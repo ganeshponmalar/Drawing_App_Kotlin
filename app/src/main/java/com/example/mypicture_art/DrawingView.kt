@@ -8,70 +8,90 @@ import android.graphics.Color
 import android.graphics.Paint
 import android.graphics.Path
 import android.util.AttributeSet
+import android.util.TypedValue
 import android.view.MotionEvent
 import android.view.View
 
-
+/**
+ * A custom View class that provides a canvas for drawing.
+ */
 class DrawingView (context: Context, attrs: AttributeSet): View(context, attrs){
 
-    //drawing path
-    private lateinit var drawPath: FingerPath
+    // Variable for the path being drawn currently
+    private var drawPath: FingerPath? = null
 
-    //defines what to draw
+    // Paint object that defines how the canvas is drawn
     private lateinit var canvasPaint: Paint
 
-    //defines how to draw
+    // Paint object that defines how the path is drawn (color, thickness, etc.)
     private lateinit var drawPaint: Paint
+    
+    // Default color for drawing
     private var color = Color.WHITE
+    
+    // Canvas where the drawing is actually performed and stored
     private lateinit var drawCanvas: Canvas
+    
+    // Bitmap that holds the drawing pixels
     private lateinit var canvasBitmap: Bitmap
+    
+    // Default brush size
     private var brushSize: Float = 20f
 
-    private val paths = mutableListOf<FingerPath>()
+    // A list to store all the paths drawn by the user to keep them on screen
+    private val paths = mutableListOf<FingerPath>() 
 
 
     init{
         setUpDrawing()
     }
 
+    /**
+     * Called when the view size changes (e.g., on initialization).
+     * We initialize the bitmap and canvas here based on the view dimensions.
+     */
     override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) {
         super.onSizeChanged(w, h, oldw, oldh)
         canvasBitmap = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
         drawCanvas = Canvas(canvasBitmap)
     }
 
+    /**
+     * Handles touch events to enable drawing.
+     */
     override fun onTouchEvent(event: MotionEvent?): Boolean {
         val touchX = event?.x ?: 0f
         val touchY = event?.y ?: 0f
 
         when (event?.action) {
-            //this event will be fired when the user put finger on the screen
+            // Finger touches the screen: start a new path
             MotionEvent.ACTION_DOWN -> {
-                drawPath.color = color
-                drawPath.brushThickness = brushSize
-
-                //resetting the path before we see initial point
-                drawPath.reset()
-                drawPath.moveTo(touchX, touchY)
+                drawPath = FingerPath(color, brushSize)
+                drawPath?.moveTo(touchX, touchY)
             }
 
-            //this event will be fired when the user move finger on the screen
+            // Finger moves: draw lines connecting the points
             MotionEvent.ACTION_MOVE -> {
-                drawPath.lineTo(touchX, touchY)
-
+                drawPath?.lineTo(touchX, touchY)
             }
 
-            //this event will be fired when the user lift finger off the screen
+            // Finger lifted: finish the path and save it to the canvas and list
             MotionEvent.ACTION_UP -> {
-                drawPaint.color = drawPath.color
-                drawPaint.strokeWidth = drawPath.brushThickness
-                drawCanvas.drawPath(drawPath, drawPaint)
-                paths.add(drawPath)
-                drawPath.reset()
+                drawPath?.let {
+                    drawPaint.color = it.color
+                    drawPaint.strokeWidth = it.brushThickness
+                    drawCanvas.drawPath(it, drawPaint)
+                    paths.add(it)
+                }
+                drawPath = null
             }
             else -> return false
         }
+        
+        // Redraw the view
         invalidate()
+        
+        // Required for accessibility when overriding onTouchEvent
         performClick()
         return true
     }
@@ -81,34 +101,80 @@ class DrawingView (context: Context, attrs: AttributeSet): View(context, attrs){
         return true
     }
 
+    /**
+     * Draws the content of the view.
+     */
     override fun onDraw(canvas: Canvas) {
         super.onDraw(canvas)
+        
+        // Draw the background bitmap that stores previous strokes
         canvas.drawBitmap(canvasBitmap, 0f, 0f, canvasPaint)
 
+        // Draw all completed paths from the list
         for (path in paths){
             drawPaint.color = path.color
             drawPaint.strokeWidth = path.brushThickness
             canvas.drawPath(path, drawPaint)
         }
         
-        if (!drawPath.isEmpty) {
-            drawPaint.strokeWidth = drawPath.brushThickness
-            drawPaint.color = drawPath.color
-            canvas.drawPath(drawPath, drawPaint)
+        // Draw the path currently being drawn by the user
+        drawPath?.let {
+            drawPaint.strokeWidth = it.brushThickness
+            drawPaint.color = it.color
+            canvas.drawPath(it, drawPaint)
         }
     }
 
+    /**
+     * Initializes the drawing properties (Paint objects).
+     */
     private fun setUpDrawing(){
-        brushSize = 20f
-        drawPath = FingerPath(color, brushSize)
         drawPaint = Paint()
         drawPaint.color = color
         drawPaint.style = Paint.Style.STROKE
         drawPaint.strokeJoin = Paint.Join.ROUND
         drawPaint.strokeCap = Paint.Cap.ROUND
-        drawPaint.strokeWidth = brushSize
         canvasPaint = Paint(Paint.DITHER_FLAG)
     }
 
+    /**
+     * Updates the brush size and converts DIP to pixels.
+     */
+    fun changeBurshSize(newSize: Float){
+        brushSize = TypedValue.applyDimension(
+            TypedValue.COMPLEX_UNIT_DIP,
+            newSize,resources.displayMetrics
+        )
+        drawPaint.strokeWidth = brushSize
+    }
+
+    /**
+     * Sets the color for drawing.
+     */
+    fun setColor(newColor: Int) {
+        color = newColor
+        drawPaint.color = color
+    }
+
+    /**
+     * Logic to undo the last stroke.
+     */
+    fun onClickUndo() {
+        if (paths.size > 0) {
+            paths.removeAt(paths.size - 1)
+            // Re-draw the canvas bitmap without the removed path
+            drawCanvas.drawColor(Color.TRANSPARENT, android.graphics.PorterDuff.Mode.CLEAR)
+            for (path in paths) {
+                drawPaint.color = path.color
+                drawPaint.strokeWidth = path.brushThickness
+                drawCanvas.drawPath(path, drawPaint)
+            }
+            invalidate()
+        }
+    }
+
+    /**
+     * Custom Path class that stores its own color and thickness.
+     */
     internal class FingerPath(var color: Int, var brushThickness: Float) : Path()
 }
